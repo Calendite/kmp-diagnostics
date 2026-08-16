@@ -48,12 +48,15 @@ enum class MyTags(override val tag: String) : LogTag {
 
 ## What is here, and what is not
 
-| In this library | Left to the application |
-| --- | --- |
-| `Diagnostics` entry points, `LogTag`, `LogLevel`, `LogEvent` | The tag enum itself |
-| `DiagnosticSink`, `CompositeSink`, `QueueingSink` | Platform log output; the database behind `LogStore` |
-| `LogRecord`, `LogQuery`, call-site capture | Any viewer UI |
-| `LogStreamProtocol` — the NDJSON wire format | The TCP server, mDNS advertisement, device codes |
+Two modules, split by who depends on them:
+
+| Module | Contents | Dependencies |
+| --- | --- | --- |
+| `:diagnostics-core` | `Diagnostics` entry points, `LogTag`, `LogLevel`, `LogEvent`, `DiagnosticSink`, `CompositeSink`, `LogRecord`/`LogQuery`, call-site capture | **none** — this is what a security-sensitive library depends on, and its entire value is that it drags nothing in with it |
+| `:diagnostics-runtime` | `QueueingSink`/`LogStore`, `LogStreamProtocol` (the NDJSON wire format) | core, kotlinx-coroutines, kotlinx-serialization |
+
+Left to the application: its tag enum, platform log output, the database behind `LogStore`, any
+viewer UI, and the TCP server / mDNS advertisement / device codes behind the stream.
 
 The split is deliberate: storage schemas, sockets and UI are application concerns with heavy
 dependencies, and a library that a cryptographic protocol depends on should carry none of them.
