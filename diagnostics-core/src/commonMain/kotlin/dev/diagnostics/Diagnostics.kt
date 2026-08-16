@@ -81,6 +81,16 @@ interface DiagnosticSink {
  * Even with logging on, **key material must not be passed in**. Developer builds persist records
  * for days, stream them in plaintext over a LAN, and export them to files that end up attached to
  * bug reports. A dev-mode leak is not ephemeral.
+ *
+ * ### Safe and unsafe throwables
+ * The `throwable` parameter is for exceptions the caller authored — messages written in the
+ * consumer's own codebase, reviewed to name reasons rather than data. Exceptions from code the
+ * caller does *not* control (parsers, crypto providers, platform APIs) can embed the bytes they
+ * choked on or internal state in their message and trace, so they go in `unsafeThrowable`
+ * instead: dropped by default, attached only when the sink was installed with
+ * `captureUnsafeThrowables = true`. The flag rides on [install] deliberately — installation is
+ * the one door, it already sits behind the build-time developer constant, and so there is no
+ * separate runtime switch that production would have to defend.
  */
 object Diagnostics {
 
@@ -89,6 +99,7 @@ object Diagnostics {
     // the cost of a missed record in the first microseconds is nil, and the alternative is an
     // expect/actual for a field.
     private var sink: DiagnosticSink? = null
+    private var captureUnsafeThrowables: Boolean = false
 
     /** True when something is listening. Call sites do not need this; they are already cheap. */
     val isInstalled: Boolean get() = sink != null
@@ -96,14 +107,21 @@ object Diagnostics {
     /**
      * Installs [sink], replacing any previous one. Call it behind a build-time developer flag so
      * that release builds have no reachable path to logging at all.
+     *
+     * [captureUnsafeThrowables] opts in to attaching `unsafeThrowable` arguments — exceptions
+     * from third-party code whose message and trace content the call site cannot vouch for.
+     * Leave it off anywhere emissions can travel (exports, bug reports, a shared log server);
+     * turn it on for a local debugging session where the extra trace is worth reading.
      */
-    fun install(sink: DiagnosticSink) {
+    fun install(sink: DiagnosticSink, captureUnsafeThrowables: Boolean = false) {
         this.sink = sink
+        this.captureUnsafeThrowables = captureUnsafeThrowables
     }
 
     /** Removes the sink, returning to the inert state. Chiefly for tests. */
     fun uninstall() {
         sink = null
+        captureUnsafeThrowables = false
     }
 
     /**
@@ -115,16 +133,20 @@ object Diagnostics {
      * [data] is a payload too big for the message and not a stack trace: an object, JSON, a dump.
      * It is a lambda for the same reason the message is, and `toString()` runs on the calling
      * thread so later mutation cannot change what was recorded.
+     *
+     * [unsafeThrowable] is for an exception the call site did not author — see the class KDoc.
+     * It is dropped unless the sink was installed with `captureUnsafeThrowables = true`.
      */
     inline fun debug(
         tag: LogTag,
         filterTag: String? = null,
         throwable: Throwable? = null,
+        unsafeThrowable: Throwable? = null,
         noinline data: (() -> Any?)? = null,
         message: () -> String,
     ) {
         if (!isInstalled) return
-        emit(LogLevel.DEBUG, tag, message(), filterTag, throwable, data?.invoke()?.toString())
+        emit(LogLevel.DEBUG, tag, message(), filterTag, throwable, unsafeThrowable, data?.invoke()?.toString())
     }
 
     /** A condition worth knowing about in any build that is listening. */
@@ -132,11 +154,12 @@ object Diagnostics {
         tag: LogTag,
         filterTag: String? = null,
         throwable: Throwable? = null,
+        unsafeThrowable: Throwable? = null,
         noinline data: (() -> Any?)? = null,
         message: () -> String,
     ) {
         if (!isInstalled) return
-        emit(LogLevel.WARNING, tag, message(), filterTag, throwable, data?.invoke()?.toString())
+        emit(LogLevel.WARNING, tag, message(), filterTag, throwable, unsafeThrowable, data?.invoke()?.toString())
     }
 
     /** A failure. Pass [throwable] rather than stringifying a trace into the message. */
@@ -144,11 +167,12 @@ object Diagnostics {
         tag: LogTag,
         filterTag: String? = null,
         throwable: Throwable? = null,
+        unsafeThrowable: Throwable? = null,
         noinline data: (() -> Any?)? = null,
         message: () -> String,
     ) {
         if (!isInstalled) return
-        emit(LogLevel.ERROR, tag, message(), filterTag, throwable, data?.invoke()?.toString())
+        emit(LogLevel.ERROR, tag, message(), filterTag, throwable, unsafeThrowable, data?.invoke()?.toString())
     }
 
     /**
@@ -162,6 +186,7 @@ object Diagnostics {
         message: String,
         filterTag: String?,
         throwable: Throwable?,
+        unsafeThrowable: Throwable?,
         data: String?,
     ) {
         val target = sink ?: return
@@ -172,7 +197,7 @@ object Diagnostics {
                 message = message,
                 filterTag = filterTag,
                 callSite = captureCallSite(),
-                throwable = throwable,
+                throwable = throwable ?: unsafeThrowable.takeIf { captureUnsafeThrowables },
                 data = data,
                 timestampEpochMillis = epochMillis(),
             )

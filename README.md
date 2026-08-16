@@ -34,6 +34,32 @@ In a release build that branch is dead code, the shrinker removes the install ca
 ever reachable, and every call site short-circuits on a null check without invoking its lambda.
 `install` is the only door, and nothing in a release build calls it.
 
+## Safe and unsafe throwables
+
+The `throwable` parameter is for exceptions the call site authored — messages written in the
+consumer's own codebase, reviewed to name reasons rather than data. An exception from code the
+call site does *not* control (a parser, a crypto provider, a platform API) can embed the bytes it
+choked on in its message and trace, so it goes in `unsafeThrowable` instead:
+
+```kotlin
+} catch (e: Exception) {
+    Diagnostics.warning(MyTags.SYNC, unsafeThrowable = e) { "envelope rejected: malformed" }
+}
+```
+
+By default the reference is dropped at emit time, so a consumer's no-secrets-in-emissions
+guarantee never rests on third-party exception hygiene. A local debugging session that wants the
+full trace opts in where the sink is installed:
+
+```kotlin
+if (FeatureFlags.developerMode) Diagnostics.install(sink, captureUnsafeThrowables = true)
+```
+
+The flag rides on `install` deliberately: installation is the one door and it already sits behind
+the build-time constant, so there is no separate runtime switch for a release build to defend.
+`uninstall` resets it. Leave it off anywhere emissions can travel — exports, bug reports, a
+shared log server.
+
 ## Tags belong to the consumer
 
 `LogTag` is an interface, not an enum, because a library cannot know an application's subsystems —

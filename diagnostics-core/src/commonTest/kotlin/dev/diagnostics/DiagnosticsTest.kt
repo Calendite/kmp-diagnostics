@@ -94,6 +94,66 @@ class DiagnosticsTest {
         assertEquals("[first]", sink.events.single().data, "what was recorded is what it said then")
     }
 
+    /**
+     * `unsafeThrowable` is for exceptions from code the call site does not control — a parser or
+     * provider whose message can embed the bytes it choked on. By default the reference is
+     * dropped at emit time, so a consumer's no-secrets-in-emissions guarantee never depends on
+     * third-party exception hygiene.
+     */
+    @Test
+    fun anUnsafeThrowableIsDroppedByDefault() {
+        val sink = RecordingSink()
+        Diagnostics.install(sink)
+
+        Diagnostics.warning(
+            TestTags.SUBSYSTEM,
+            unsafeThrowable = IllegalArgumentException("bad byte 0xDEADBEEF at offset 12"),
+        ) { "delivery rejected: malformed" }
+
+        val event = sink.events.single()
+        assertEquals("delivery rejected: malformed", event.message)
+        assertNull(event.throwable, "an unsafe throwable must not survive a default install")
+    }
+
+    @Test
+    fun anUnsafeThrowableIsAttachedOnlyWhenTheInstallOptedIn() {
+        val sink = RecordingSink()
+        Diagnostics.install(sink, captureUnsafeThrowables = true)
+
+        val raw = IllegalArgumentException("bad byte 0xDEADBEEF at offset 12")
+        Diagnostics.warning(TestTags.SUBSYSTEM, unsafeThrowable = raw) { "delivery rejected: malformed" }
+
+        assertEquals(raw, sink.events.single().throwable)
+    }
+
+    /** A safe throwable always wins the slot; the opt-in only governs unsafe ones. */
+    @Test
+    fun aSafeThrowableIsAttachedRegardlessOfTheFlag() {
+        val sink = RecordingSink()
+        Diagnostics.install(sink)
+
+        val authored = IllegalStateException("delivery rejected after the MAC gate")
+        Diagnostics.warning(TestTags.SUBSYSTEM, throwable = authored) { "rejected" }
+
+        assertEquals(authored, sink.events.single().throwable)
+    }
+
+    /**
+     * Uninstall resets the opt-in, so a later plain [Diagnostics.install] cannot inherit unsafe
+     * capture from an earlier session. The flag has exactly one door: the install that asked.
+     */
+    @Test
+    fun uninstallResetsTheUnsafeCaptureOptIn() {
+        Diagnostics.install(RecordingSink(), captureUnsafeThrowables = true)
+        Diagnostics.uninstall()
+
+        val sink = RecordingSink()
+        Diagnostics.install(sink)
+        Diagnostics.warning(TestTags.SUBSYSTEM, unsafeThrowable = IllegalStateException("raw")) { "again" }
+
+        assertNull(sink.events.single().throwable, "the opt-in must not outlive its install")
+    }
+
     @Test
     fun uninstallingStopsDeliveryImmediately() {
         val sink = RecordingSink()
