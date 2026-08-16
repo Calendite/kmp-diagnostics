@@ -10,7 +10,7 @@ version = "0.1.0"
 kotlin {
     jvm()
     androidTarget()
-    listOf(iosArm64(), iosSimulatorArm64())
+    listOf(iosArm64(), iosSimulatorArm64(), iosX64())
     wasmJs { browser() }
 
     applyDefaultHierarchyTemplate()
