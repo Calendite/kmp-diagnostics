@@ -1,6 +1,6 @@
 [versions]
 kotlin = "2.3.20"
-agp = "8.13.2"
+agp = "9.1.1"
 kotlinxSerialization = "1.9.0"
 kotlinxCoroutines = "1.10.2"
 androidCompileSdk = "35"
