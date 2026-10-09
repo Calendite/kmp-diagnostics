@@ -15,6 +15,8 @@ kotlin {
         compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11) }
     }
     listOf(iosArm64(), iosSimulatorArm64(), iosX64())
+    // Calendite's background daemons run on the Mac as Kotlin/Native.
+    macosArm64()
     wasmJs { browser() }
 
     applyDefaultHierarchyTemplate()
